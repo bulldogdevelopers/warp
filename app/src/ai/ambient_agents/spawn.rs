@@ -31,30 +31,26 @@ pub struct SessionJoinInfo {
 
 impl SessionJoinInfo {
     pub fn from_task(task: &AmbientAgentTask) -> Option<Self> {
-        // Prefer the server-provided session_link when available; it is a better signal
-        // that a session-sharing link is ready to be shown to the user.
-        if let Some(link) = task.session_link.as_ref().filter(|l| !l.is_empty()) {
-            let session_id = task
-                .session_id
-                .as_deref()
-                .and_then(|s| SessionId::from_str(s).ok());
-            return Some(Self {
-                session_id,
-                session_link: link.to_string(),
-            });
-        }
-
-        // Fallback to constructing a link from the session_id.
-        if let Some(session_id_str) = task.session_id.as_deref() {
-            if let Ok(session_id) = SessionId::from_str(session_id_str) {
-                return Some(Self {
-                    session_id: Some(session_id),
-                    session_link: shared_session::join_link(&session_id),
-                });
-            }
-        }
-
-        None
+        // Require `session_id`: it's what the cloud-mode pane needs to actually join
+        // the shared session.
+        // A standalone `session_link` is not enough to act on, and the GET task
+        // handler may overwrite `session_link` with a conversation link (e.g. for a
+        // local-to-cloud handoff fork that already has gcs-synced conversation data),
+        // which we'd otherwise misinterpret as a session-sharing link.
+        let session_id_str = task.session_id.as_deref()?;
+        let session_id = SessionId::from_str(session_id_str).ok()?;
+        // Prefer the server-provided `session_link` when present; otherwise construct
+        // a join link from `session_id`.
+        let session_link = task
+            .session_link
+            .as_ref()
+            .filter(|l| !l.is_empty())
+            .cloned()
+            .unwrap_or_else(|| shared_session::join_link(&session_id));
+        Some(Self {
+            session_id: Some(session_id),
+            session_link,
+        })
     }
 }
 
